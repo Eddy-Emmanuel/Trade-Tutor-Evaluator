@@ -350,8 +350,15 @@ if run_btn or True:   # auto-run on load; re-runs when button pressed
         if c in show_df.columns:
             show_df[c] = show_df[c].map(lambda x: f"{x:.7f}" if pd.notna(x) else "")
 
-    st.dataframe(show_df.style.apply(highlight_action, axis=1),
-                 use_container_width=True, height=400)
+    MAX_STYLE_CELLS = 262_144
+    total_cells = show_df.shape[0] * show_df.shape[1]
+
+    if total_cells <= MAX_STYLE_CELLS:
+        st.dataframe(show_df.style.apply(highlight_action, axis=1),
+                    width='stretch', height=400)
+    else:
+        st.caption(f"⚠️ Large dataset ({total_cells:,} cells) — row highlighting disabled for performance.")
+        st.dataframe(show_df, width='stretch', height=400)
 
     # ── Trade log ────────────────────────────────────────────────────────────────
     if pnl["trades"] > 0:
