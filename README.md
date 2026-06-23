@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # SMA Trading Signal Calculator
 
 A Streamlit app for loading trade data, calculating Simple Moving Average (SMA) buy/sell thresholds, and producing trading signals with an Excel export.
@@ -126,4 +125,3 @@ The app will normalize and use the following columns if present:
 - The app currently auto-runs calculations on upload.
 - `Transaction Time` values can be Excel serial dates or datetime strings.
 - P&L is estimated using completed Buy→Sell pairs and a configurable shares-per-trade value.
->>>>>>> e768a73 (updated code base)
