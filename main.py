@@ -1,9 +1,11 @@
+import io
 import pandas as pd
 import streamlit as st
 
 from indicators.engine import INDICATOR_MAP, INDICATOR_HINTS
 from utils.file_loader import load_file, available_price_cols, validate_sma_columns
 from utils.pipeline import build_result_df, compute_pnl
+from utils.excel_export import build_workbook
 
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -454,10 +456,39 @@ if run_btn or True:
 
     # ── Download ───────────────────────────────────────────────────────────────
     st.markdown('<div class="section-header">Export</div>', unsafe_allow_html=True)
-    csv_bytes = df_result.to_csv(index=False).encode()
-    st.download_button(
-        "⬇ Download Results (CSV)",
-        data=csv_bytes,
-        file_name="trade_results.csv",
-        mime="text/csv",
+
+    col_csv, col_xlsx = st.columns(2)
+
+    with col_csv:
+        csv_bytes = df_result.to_csv(index=False).encode()
+        st.download_button(
+            "⬇ Download Results (CSV)",
+            data=csv_bytes,
+            file_name="trade_results.csv",
+            mime="text/csv",
+            use_container_width=True,
+        )
+
+    with col_xlsx:
+        try:
+            wb = build_workbook(
+                df_raw, indicator_name, price_col, window,
+                buy_pct, sell_pct, buy_direction, sell_direction,
+            )
+            buf = io.BytesIO()
+            wb.save(buf)
+            st.download_button(
+                "⬇ Download Results (Excel — live formulas)",
+                data=buf.getvalue(),
+                file_name="trade_results_formulas.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+            )
+        except Exception as e:
+            st.error(f"Excel export error: {e}")
+
+    st.caption(
+        "The Excel file recalculates live: every indicator value, threshold, "
+        "Buy/Sell Condition, Position, Action, and Status cell is a real Excel "
+        "formula (see the **Settings** sheet to tweak Window / % / Direction)."
     )
