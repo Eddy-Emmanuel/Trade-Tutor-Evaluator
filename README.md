@@ -1,15 +1,23 @@
-# SMA Trading Signal Calculator
+# Trade Model Evaluator
 
-A Streamlit app for loading trade data, calculating Simple Moving Average (SMA) buy/sell thresholds, and producing trading signals with an Excel export.
+A Streamlit app for uploading trade data, evaluating technical indicator-based trading rules, and comparing calculated actions with uploaded trade actions.
 
 ## Features
 
 - Upload `.xlsx`, `.xls`, or `.csv` trade files
-- Normalize common columns such as `S/N`, `Symbol`, `Transaction Time`, and `Mid Price`
-- Recompute SMA, buy threshold, sell threshold, position state, and buy/sell/hold actions
-- Display calculated results in a styled Streamlit dashboard
-- Estimate P&L using completed buy/sell round-trip trades
-- Download an Excel workbook with live formulas for SMA and trading signals
+- Normalize common columns such as `S/N`, `Symbol`, `Transaction Time`, and `Mid Price` / `Ask Price` / `Bid Price`
+- Choose from multiple technical indicators, including SMA, EMA, RSI, MACD, Bollinger Bands, Stochastic, Fibonacci, Standard Deviation, ADX, and Heikin Ashi
+- Configure buy and sell thresholds, price source, direction, and trade quantity
+- Generate calculated position and action columns from the selected strategy
+- Compare calculated actions with the uploaded `Action` column and show `Pass`, `Fail`, or `N/A` status
+- Display KPI summaries and estimated P&L from completed Buy → Sell round-trip trades
+
+## Project structure
+
+- `main.py` — Streamlit application UI and layout
+- `indicators/engine.py` — indicator implementations and signal generation
+- `utils/file_loader.py` — file parsing and column normalization
+- `utils/pipeline.py` — result dataframe creation, status evaluation, and P&L calculation
 
 ## Requirements
 
@@ -40,24 +48,23 @@ Then open the local URL shown in the terminal.
 The app will normalize and use the following columns if present:
 
 - `S/N` — row number
-- `Symbol` — ticker / instrument
+- `Symbol` — ticker or instrument
 - `Transaction Time` — timestamp or Excel serial date
-- `Mid Price` — price used for SMA and signals
-- `Moving Average` — optional pre-computed value (will be recalculated)
+- `Mid Price`, `Ask Price`, or `Bid Price` — price data used for analysis
+- `Moving Average` — optional pre-computed value
 - `Position` — optional `In` / `Out`
 - `Action` — optional `Buy` / `Sell` / `Hold`
 
 ## How it works
 
-1. Load the uploaded file and clean the data.
-2. Compute the SMA for the chosen window.
-3. Create buy/sell thresholds based on percentage offsets.
-4. Generate a position state machine and trade actions.
-5. Show KPIs, signals, and round-trip trades.
-6. Export an Excel file with formulas so the model can be reviewed live in Excel.
+1. Load and clean the uploaded file.
+2. Select an indicator and configure the buy/sell logic.
+3. Compute indicator values and threshold-based conditions.
+4. Generate calculated positions and actions.
+5. Compare results with uploaded actions and display status and P&L.
 
 ## Notes
 
-- The app currently auto-runs calculations on upload.
 - `Transaction Time` values can be Excel serial dates or datetime strings.
-- P&L is estimated using completed Buy→Sell pairs and a configurable shares-per-trade value.
+- The app supports multiple price columns and will use the selected price column when available.
+- P&L is estimated using completed Buy → Sell pairs and a configurable shares-per-trade value.
