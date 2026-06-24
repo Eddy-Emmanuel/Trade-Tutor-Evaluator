@@ -11,22 +11,37 @@ Each compute_* function returns a dict with:
 """
 import numpy as np
 import pandas as pd
-
+from decimal import Decimal, ROUND_HALF_UP
 
 # ─────────────────────────── helpers ────────────────────────────────────────
-def _state_machine(buy_cond: list, sell_cond: list) -> tuple[list, list]:
-    """Universal Out→In state machine. Returns (position, action)."""
+def _state_machine(buy_cond: list, sell_cond: list, repeat: bool = False) -> tuple[list, list]:
+    """Universal state machine. Returns (position, action).
+
+    repeat=False (default): alternates Buy → Sell → Buy → Sell.
+                            After a Buy, further Buy signals are ignored until a Sell fires.
+    repeat=True:            reacts to every signal; consecutive Buys or Sells are allowed.
+    """
     position, action = [], []
     state = "Out"
     for bc, sc in zip(buy_cond, sell_cond):
-        if state == "Out" and bc:
-            state = "In"
-            action.append("Buy")
-        elif state == "In" and sc:
-            state = "Out"
-            action.append("Sell")
+        if repeat:
+            if bc:
+                state = "In"
+                action.append("Buy")
+            elif sc:
+                state = "Out"
+                action.append("Sell")
+            else:
+                action.append("Hold")
         else:
-            action.append("Hold")
+            if state == "Out" and bc:
+                state = "In"
+                action.append("Buy")
+            elif state == "In" and sc:
+                state = "Out"
+                action.append("Sell")
+            else:
+                action.append("Hold")
         position.append(state)
     return position, action
 
@@ -44,8 +59,16 @@ def compute_sma(
     sell_pct: float,
     buy_direction: str,
     sell_direction: str,
+    repeat: bool = False,
 ) -> dict:
-    sma = prices.rolling(window=window).mean()
+    sma = prices.rolling(window=window).mean().apply(
+        lambda x: float(
+            Decimal(str(x)).quantize(
+                Decimal("0.0001"),
+                rounding=ROUND_HALF_UP
+            )
+        ) if pd.notna(x) else x
+    )
     buy_thresh  = _threshold(sma, buy_pct,  buy_direction)
     sell_thresh = _threshold(sma, sell_pct, sell_direction)
 
@@ -61,7 +84,7 @@ def compute_sma(
             buy_cond.append(buy_op(p, bt))
             sell_cond.append(sell_op(p, st))
 
-    position, action = _state_machine(buy_cond, sell_cond)
+    position, action = _state_machine(buy_cond, sell_cond, repeat)
     return {
         "indicator_col": "Moving Average (calc)",
         "indicator_vals": sma,
@@ -75,7 +98,6 @@ def compute_sma(
         "buy_cond": buy_cond, "sell_cond": sell_cond,
     }
 
-
 # ─────────────────────────── 2. EMA ─────────────────────────────────────────
 def compute_ema(
     prices: pd.Series,
@@ -84,6 +106,7 @@ def compute_ema(
     sell_pct: float,
     buy_direction: str,
     sell_direction: str,
+    repeat: bool = False,
 ) -> dict:
     alpha = 2 / (window + 1)
     ema_vals = [prices.iloc[0]]
@@ -100,7 +123,7 @@ def compute_ema(
     buy_cond  = [buy_op(prices.iloc[i],  buy_thresh.iloc[i])  for i in range(len(prices))]
     sell_cond = [sell_op(prices.iloc[i], sell_thresh.iloc[i]) for i in range(len(prices))]
 
-    position, action = _state_machine(buy_cond, sell_cond)
+    position, action = _state_machine(buy_cond, sell_cond, repeat)
     return {
         "indicator_col": "EMA (calc)",
         "indicator_vals": ema,
@@ -123,6 +146,7 @@ def compute_stochastic(
     sell_pct: float,
     buy_direction: str,
     sell_direction: str,
+    repeat: bool = False,
 ) -> dict:
     # %K = (C - L_n) / (H_n - L_n) * 100
     low_n  = prices.rolling(window=window).min()
@@ -143,7 +167,7 @@ def compute_stochastic(
         buy_cond.append(prev <= OVERSOLD   and curr > OVERSOLD)
         sell_cond.append(prev >= OVERBOUGHT and curr < OVERBOUGHT)
 
-    position, action = _state_machine(buy_cond, sell_cond)
+    position, action = _state_machine(buy_cond, sell_cond, repeat)
     return {
         "indicator_col": "%K (calc)",
         "indicator_vals": k,
@@ -165,6 +189,7 @@ def compute_macd(
     sell_pct: float,
     buy_direction: str,
     sell_direction: str,
+    repeat: bool = False,
 ) -> dict:
     def _ema_series(s, n):
         a = 2 / (n + 1)
@@ -188,7 +213,7 @@ def compute_macd(
         buy_cond.append(prev_m <= prev_s and curr_m > curr_s)
         sell_cond.append(prev_m >= prev_s and curr_m < curr_s)
 
-    position, action = _state_machine(buy_cond, sell_cond)
+    position, action = _state_machine(buy_cond, sell_cond, repeat)
     return {
         "indicator_col": "MACD (calc)",
         "indicator_vals": macd,
@@ -212,6 +237,7 @@ def compute_bollinger(
     buy_direction: str,
     sell_direction: str,
     k: float = 2.0,
+    repeat: bool = False,
 ) -> dict:
     mid   = prices.rolling(window=window).mean()
     sigma = prices.rolling(window=window).std(ddof=0)  # population std
@@ -224,7 +250,7 @@ def compute_bollinger(
     sell_cond = [prices.iloc[i] > upper.iloc[i] if not pd.isna(upper.iloc[i]) else False
                  for i in range(len(prices))]
 
-    position, action = _state_machine(buy_cond, sell_cond)
+    position, action = _state_machine(buy_cond, sell_cond, repeat)
     return {
         "indicator_col": "BB Middle (calc)",
         "indicator_vals": mid,
@@ -247,6 +273,7 @@ def compute_rsi(
     sell_pct: float,
     buy_direction: str,
     sell_direction: str,
+    repeat: bool = False,
 ) -> dict:
     delta  = prices.diff()
     gain   = delta.clip(lower=0)
@@ -272,7 +299,7 @@ def compute_rsi(
         buy_cond.append(prev <= OVERSOLD   and curr > OVERSOLD)
         sell_cond.append(prev >= OVERBOUGHT and curr < OVERBOUGHT)
 
-    position, action = _state_machine(buy_cond, sell_cond)
+    position, action = _state_machine(buy_cond, sell_cond, repeat)
     return {
         "indicator_col": "RSI (calc)",
         "indicator_vals": rsi,
@@ -293,6 +320,7 @@ def compute_fibonacci(
     sell_pct: float,
     buy_direction: str,
     sell_direction: str,
+    repeat: bool = False,
 ) -> dict:
     roll_low  = prices.rolling(window=window).min()
     roll_high = prices.rolling(window=window).max()
@@ -310,7 +338,7 @@ def compute_fibonacci(
     sell_cond = [prices.iloc[i] > fib618.iloc[i] if not pd.isna(fib618.iloc[i]) else False
                  for i in range(len(prices))]
 
-    position, action = _state_machine(buy_cond, sell_cond)
+    position, action = _state_machine(buy_cond, sell_cond, repeat)
     return {
         "indicator_col": "Fib 50% (calc)",
         "indicator_vals": fib500,
@@ -336,6 +364,7 @@ def compute_std_dev(
     buy_direction: str,
     sell_direction: str,
     k: float = 2.0,
+    repeat: bool = False,
 ) -> dict:
     mu    = prices.rolling(window=window).mean()
     sigma = prices.rolling(window=window).std(ddof=0)
@@ -348,7 +377,7 @@ def compute_std_dev(
     sell_cond = [prices.iloc[i] > upper.iloc[i] if not pd.isna(upper.iloc[i]) else False
                  for i in range(len(prices))]
 
-    position, action = _state_machine(buy_cond, sell_cond)
+    position, action = _state_machine(buy_cond, sell_cond, repeat)
     return {
         "indicator_col": "Std Dev σ (calc)",
         "indicator_vals": sigma,
@@ -372,6 +401,7 @@ def compute_adx(
     sell_pct: float,
     buy_direction: str,
     sell_direction: str,
+    repeat: bool = False,
 ) -> dict:
     # Approximate ADX from a single price series (no H/L/C columns)
     # Use price as proxy for H, L, C (same series)
@@ -404,7 +434,7 @@ def compute_adx(
         buy_cond.append(prev <= STRONG and curr > STRONG)
         sell_cond.append(prev >= WEAK   and curr < WEAK)
 
-    position, action = _state_machine(buy_cond, sell_cond)
+    position, action = _state_machine(buy_cond, sell_cond, repeat)
     return {
         "indicator_col": "ADX (calc)",
         "indicator_vals": adx,
@@ -427,6 +457,7 @@ def compute_heikin_ashi(
     sell_pct: float,
     buy_direction: str,
     sell_direction: str,
+    repeat: bool = False,
 ) -> dict:
     # With only one price series, treat O=H=L=C=price
     ha_close = prices  # (O+H+L+C)/4 = price when all are same
@@ -447,7 +478,7 @@ def compute_heikin_ashi(
         buy_fired.append(buy_cond[i]  and not prev_b)
         sell_fired.append(sell_cond[i] and not prev_s)
 
-    position, action = _state_machine(buy_fired, sell_fired)
+    position, action = _state_machine(buy_fired, sell_fired, repeat)
     return {
         "indicator_col": "HA Close (calc)",
         "indicator_vals": ha_close,
@@ -498,8 +529,9 @@ def run_indicator(
     sell_pct: float,
     buy_direction: str,
     sell_direction: str,
+    repeat: bool = False,
 ) -> dict:
     fn = INDICATOR_MAP.get(indicator_name)
     if fn is None:
         raise ValueError(f"Unknown indicator: {indicator_name}")
-    return fn(prices, window, buy_pct, sell_pct, buy_direction, sell_direction)
+    return fn(prices, window, buy_pct, sell_pct, buy_direction, sell_direction, repeat)

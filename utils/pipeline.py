@@ -47,6 +47,7 @@ def build_result_df(
     sell_pct: float,
     buy_direction: str,
     sell_direction: str,
+    repeat_flag: bool = False,
 ) -> pd.DataFrame:
     if price_col not in df_raw.columns:
         raise ValueError(f"Price column '{price_col}' not in data.")
@@ -54,11 +55,13 @@ def build_result_df(
     prices = df_raw[price_col]
     result = run_indicator(
         indicator_name, prices, window,
-        buy_pct, sell_pct, buy_direction, sell_direction,
+        buy_pct, sell_pct, buy_direction, sell_direction, repeat_flag,
     )
 
     df = df_raw.copy()
+    # round_dp = 4 if result["indicator_col"] == "Moving Average (calc)" else 7
     df[result["indicator_col"]] = result["indicator_vals"].round(7)
+    
     for col_name, col_series in result["extra_cols"].items():
         df[col_name] = col_series if "Condition" in col_name else col_series.round(7)
     df["Position (calc)"] = result["position"]

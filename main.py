@@ -267,13 +267,27 @@ with st.sidebar:
     )
 
     st.markdown("---")
+
+    # ── Repeat Trade Flag ─────────────────────────────────────────────────────
+    repeat_flag = st.toggle(
+        "Repeat Trade Flag ⓘ",
+        value=False,
+        help=(
+            "OFF — Strategy alternates: Buy → Sell → Buy → Sell. "
+            "A new Buy is ignored until the previous position is closed with a Sell.\n\n"
+            "ON — Strategy reacts to every signal. Consecutive Buys or Sells are allowed "
+            "(e.g. Buy → Buy → Sell → Sell → Buy)."
+        ),
+    )
+
+    st.markdown("---")
     run_btn = st.button("▶ Calculate", use_container_width=True, type="primary")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
 # MAIN AREA
 # ══════════════════════════════════════════════════════════════════════════════
-st.markdown("## 📊 SMA Trading Signal Calculator")
+st.markdown("## 📊 Trading Signal Evaluator")
 st.caption(
     "Upload a trade file and configure your strategy using the sidebar. "
     "Results include buy/sell signals, Status validation (Pass / Fail / N/A), and P&L."
@@ -358,6 +372,7 @@ if run_btn or True:
         df_result = build_result_df(
             df_raw, indicator_name, price_col,
             window, buy_pct, sell_pct, buy_direction, sell_direction,
+            repeat_flag,
         )
     except Exception as e:
         st.error(f"Calculation error: {e}")
