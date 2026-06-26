@@ -435,11 +435,11 @@ if run_btn or True:
     # Format numeric columns
     numeric_display = [
         c for c in show_df.columns
-        if show_df[c].dtype in [float] and "Condition" not in c
+        if pd.api.types.is_float_dtype(show_df[c]) and "Condition" not in c
     ]
     for c in numeric_display:
         show_df[c] = show_df[c].map(
-            lambda x: f"{x:.7f}" if pd.notna(x) else ""
+            lambda x: f"{x:.4f}" if pd.notna(x) else ""
         )
 
     MAX_CELLS = 262_144
@@ -461,8 +461,8 @@ if run_btn or True:
                     unsafe_allow_html=True)
         trades_df = pd.DataFrame({
             "#":          range(1, pnl["trades"] + 1),
-            "Buy Price":  [f"{b:.7f}" for b in pnl["buys"]],
-            "Sell Price": [f"{s:.7f}" for s in pnl["sells"]],
+            "Buy Price":  [f"{b:.4f}" for b in pnl["buys"]],
+            "Sell Price": [f"{s:.4f}" for s in pnl["sells"]],
             "P&L (£)":    [f"{p:+.4f}" for p in pnl["pnl_list"]],
         })
         st.dataframe(trades_df, use_container_width=True, hide_index=True)

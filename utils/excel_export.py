@@ -507,6 +507,7 @@ def build_workbook(
             formula = fn(r, L)
             c = ws.cell(row=r, column=all_cols.index(name) + 1, value=formula)
             c.font = GREY if hidden else BLACK
+            c.number_format = "0.0000"
 
         prev_pos_ref = '"Out"' if r == 2 else f'{L["Position (calc)"]}{r-1}'
         buy_cell = f'{L["Buy Condition"]}{r}'
