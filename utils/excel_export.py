@@ -7,7 +7,7 @@ the Settings sheet and the whole Results sheet recalculates in Excel.
 Public entry point: build_workbook(...) -> openpyxl.Workbook
 """
 from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.styles import Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 BLUE  = Font(color="0000FF")

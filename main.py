@@ -1,11 +1,13 @@
+# main.py
+
 import io
 import pandas as pd
 import streamlit as st
 
+from utils.excel_export import build_workbook
+from utils.pipeline import build_result_df, compute_pnl
 from indicators.engine import INDICATOR_MAP, INDICATOR_HINTS
 from utils.file_loader import load_file, available_price_cols, validate_sma_columns
-from utils.pipeline import build_result_df, compute_pnl
-from utils.excel_export import build_workbook
 
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(

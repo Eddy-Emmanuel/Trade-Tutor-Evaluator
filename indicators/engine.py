@@ -11,7 +11,6 @@ Each compute_* function returns a dict with:
 """
 import numpy as np
 import pandas as pd
-from decimal import Decimal, ROUND_HALF_UP
 
 # ─────────────────────────── helpers ────────────────────────────────────────
 def _state_machine(buy_cond: list, sell_cond: list, repeat: bool = False) -> tuple[list, list]:
@@ -142,10 +141,6 @@ def compute_ema(
 def compute_stochastic(
     prices: pd.Series,
     window: int,
-    buy_pct: float,   # ignored for stochastic (fixed levels)
-    sell_pct: float,
-    buy_direction: str,
-    sell_direction: str,
     repeat: bool = False,
 ) -> dict:
     # %K = (C - L_n) / (H_n - L_n) * 100
@@ -184,11 +179,6 @@ def compute_stochastic(
 # ─────────────────────────── 4. MACD ────────────────────────────────────────
 def compute_macd(
     prices: pd.Series,
-    window: int,      # unused; MACD uses fixed 12/26/9
-    buy_pct: float,
-    sell_pct: float,
-    buy_direction: str,
-    sell_direction: str,
     repeat: bool = False,
 ) -> dict:
     def _ema_series(s, n):
@@ -232,10 +222,6 @@ def compute_macd(
 def compute_bollinger(
     prices: pd.Series,
     window: int,
-    buy_pct: float,
-    sell_pct: float,
-    buy_direction: str,
-    sell_direction: str,
     k: float = 2.0,
     repeat: bool = False,
 ) -> dict:
@@ -269,10 +255,6 @@ def compute_bollinger(
 def compute_rsi(
     prices: pd.Series,
     window: int,
-    buy_pct: float,
-    sell_pct: float,
-    buy_direction: str,
-    sell_direction: str,
     repeat: bool = False,
 ) -> dict:
     delta  = prices.diff()
@@ -316,10 +298,6 @@ def compute_rsi(
 def compute_fibonacci(
     prices: pd.Series,
     window: int,
-    buy_pct: float,
-    sell_pct: float,
-    buy_direction: str,
-    sell_direction: str,
     repeat: bool = False,
 ) -> dict:
     roll_low  = prices.rolling(window=window).min()
@@ -359,10 +337,6 @@ def compute_fibonacci(
 def compute_std_dev(
     prices: pd.Series,
     window: int,
-    buy_pct: float,
-    sell_pct: float,
-    buy_direction: str,
-    sell_direction: str,
     k: float = 2.0,
     repeat: bool = False,
 ) -> dict:
@@ -397,10 +371,6 @@ def compute_std_dev(
 def compute_adx(
     prices: pd.Series,
     window: int,
-    buy_pct: float,
-    sell_pct: float,
-    buy_direction: str,
-    sell_direction: str,
     repeat: bool = False,
 ) -> dict:
     # Approximate ADX from a single price series (no H/L/C columns)
@@ -452,11 +422,6 @@ def compute_adx(
 # ─────────────────────────── 10. Heikin Ashi ────────────────────────────────
 def compute_heikin_ashi(
     prices: pd.Series,
-    window: int,
-    buy_pct: float,
-    sell_pct: float,
-    buy_direction: str,
-    sell_direction: str,
     repeat: bool = False,
 ) -> dict:
     # With only one price series, treat O=H=L=C=price
