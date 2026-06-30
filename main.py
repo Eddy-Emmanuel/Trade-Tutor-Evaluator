@@ -383,17 +383,15 @@ if run_btn or True:
     # ── KPI cards ──────────────────────────────────────────────────────────────
     n_pass = (df_result["Status"] == "Pass").sum() if "Status" in df_result.columns else 0
     n_fail = (df_result["Status"] == "Fail").sum() if "Status" in df_result.columns else 0
-    pnl_color = "green" if pnl["total"] >= 0 else "red"
 
-    cols = st.columns(6)
+    cols = st.columns(4)
     kpis = [
         ("Total Rows",    f"{len(df_result):,}",              ""),
         ("Indicator",     indicator_name.split()[0],           ""),
-        ("Round Trips",   f"{pnl['trades']}",                 ""),
-        ("Win / Loss",    f"{pnl['wins']} / {pnl['losses']}", ""),
-        ("Est. P&L",      f"£{pnl['total']:,.2f}",             pnl_color),
-        ("Pass / Fail",   f"{n_pass} / {n_fail}",
-         "green" if n_fail == 0 and n_pass > 0 else ("amber" if n_fail > 0 else "")),
+        ("Pass",          f"{n_pass}",
+         "green" if n_pass > 0 else ""),
+        ("Fail",          f"{n_fail}",
+         "red" if n_fail > 0 else ""),
     ]
     for col, (lbl, val_str, color) in zip(cols, kpis):
         with col:
@@ -472,35 +470,23 @@ if run_btn or True:
     # ── Download ───────────────────────────────────────────────────────────────
     st.markdown('<div class="section-header">Export</div>', unsafe_allow_html=True)
 
-    col_csv, col_xlsx = st.columns(2)
-
-    with col_csv:
-        csv_bytes = df_result.to_csv(index=False).encode()
+    try:
+        wb = build_workbook(
+            df_raw, indicator_name, price_col, window,
+            buy_pct, sell_pct, buy_direction, sell_direction,
+            repeat_flag,
+        )
+        buf = io.BytesIO()
+        wb.save(buf)
         st.download_button(
-            "⬇ Download Results (CSV)",
-            data=csv_bytes,
-            file_name="trade_results.csv",
-            mime="text/csv",
+            "⬇ Download Results (Excel — live formulas)",
+            data=buf.getvalue(),
+            file_name="trade_results_formulas.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True,
         )
-
-    with col_xlsx:
-        try:
-            wb = build_workbook(
-                df_raw, indicator_name, price_col, window,
-                buy_pct, sell_pct, buy_direction, sell_direction,
-            )
-            buf = io.BytesIO()
-            wb.save(buf)
-            st.download_button(
-                "⬇ Download Results (Excel — live formulas)",
-                data=buf.getvalue(),
-                file_name="trade_results_formulas.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
-            )
-        except Exception as e:
-            st.error(f"Excel export error: {e}")
+    except Exception as e:
+        st.error(f"Excel export error: {e}")
 
     st.caption(
         "The Excel file recalculates live: every indicator value, threshold, "

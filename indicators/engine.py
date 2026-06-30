@@ -61,14 +61,14 @@ def compute_sma(
     sell_direction: str,
     repeat: bool = False,
 ) -> dict:
-    sma = prices.rolling(window=window).mean().apply(
-        lambda x: float(
-            Decimal(str(x)).quantize(
-                Decimal("0.0001"),
-                rounding=ROUND_HALF_UP
-            )
-        ) if pd.notna(x) else x
-    )
+    # NOTE: do NOT round sma here. The Excel export computes Buy/Sell Threshold
+    # and Buy/Sell Condition off the full-precision AVERAGE() value (the cell's
+    # "0.0000" number format is display-only, not an actual rounding of the
+    # value used in downstream formulas). Rounding here, before the thresholds
+    # and conditions are derived, can flip a condition near a boundary versus
+    # Excel and cascade into different Action(calc)/Status results. Display
+    # rounding is applied later in pipeline.build_result_df via _round4().
+    sma = prices.rolling(window=window).mean()
     buy_thresh  = _threshold(sma, buy_pct,  buy_direction)
     sell_thresh = _threshold(sma, sell_pct, sell_direction)
 

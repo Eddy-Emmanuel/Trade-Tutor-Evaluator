@@ -33,7 +33,7 @@ KBAND   = "Settings!$B$6"
 ALPHA   = "Settings!$B$7"
 
 
-def _build_settings_sheet(wb, window, buy_pct, sell_pct, buy_direction, sell_direction):
+def _build_settings_sheet(wb, window, buy_pct, sell_pct, buy_direction, sell_direction, repeat_flag=False):
     ws = wb.active
     ws.title = "Settings"
     rows = [
@@ -44,6 +44,7 @@ def _build_settings_sheet(wb, window, buy_pct, sell_pct, buy_direction, sell_dir
         ("Sell Direction",     sell_direction),
         ("Band k (Bollinger/StdDev)", 2.0),
         ("EMA alpha (auto)",  "=2/(B1+1)"),
+        ("Repeat Trade Flag", "TRUE" if repeat_flag else "FALSE"),
     ]
     for i, (label, val) in enumerate(rows, start=1):
         ws.cell(row=i, column=1, value=label).font = Font(bold=True)
@@ -53,7 +54,9 @@ def _build_settings_sheet(wb, window, buy_pct, sell_pct, buy_direction, sell_dir
     ws.column_dimensions["B"].width = 16
     ws["D1"] = ("Edit the blue cells above (Window, %, Direction) — the Results "
                 "sheet recalculates automatically. Direction must be exactly "
-                "'above' or 'below'.")
+                "'above' or 'below'. Repeat Trade Flag is baked into the "
+                "Position/Action formulas at export time — changing it here "
+                "after export will NOT update the formulas; re-export instead.")
     ws["D1"].font = GREY
     return ws
 
@@ -63,12 +66,25 @@ def _offset(price_cell, win_ref=WIN):
     return f"OFFSET({price_cell},-({win_ref}-1),0,{win_ref},1)"
 
 
-def _state_machine_formulas(r, buy_cell, sell_cell, prev_pos_ref):
-    """Universal Position(calc)/Action(calc) formulas (used by ALL indicators)."""
-    action = (f'=IF(AND({prev_pos_ref}="Out",{buy_cell}),"Buy",'
-              f'IF(AND({prev_pos_ref}="In",{sell_cell}),"Sell","Hold"))')
-    position = (f'=IF(AND({prev_pos_ref}="Out",{buy_cell}),"In",'
-                f'IF(AND({prev_pos_ref}="In",{sell_cell}),"Out",{prev_pos_ref}))')
+def _state_machine_formulas(r, buy_cell, sell_cell, prev_pos_ref, repeat_flag=False):
+    """Universal Position(calc)/Action(calc) formulas (used by ALL indicators).
+
+    repeat_flag=False (default): alternates Buy -> Sell -> Buy -> Sell. A new
+        Buy is ignored until the previous position is closed with a Sell.
+        Mirrors indicators.engine._state_machine(repeat=False).
+    repeat_flag=True: reacts to every signal; consecutive Buys/Sells allowed.
+        Mirrors indicators.engine._state_machine(repeat=True).
+    """
+    if repeat_flag:
+        action = (f'=IF({buy_cell},"Buy",'
+                  f'IF({sell_cell},"Sell","Hold"))')
+        position = (f'=IF({buy_cell},"In",'
+                    f'IF({sell_cell},"Out",{prev_pos_ref}))')
+    else:
+        action = (f'=IF(AND({prev_pos_ref}="Out",{buy_cell}),"Buy",'
+                  f'IF(AND({prev_pos_ref}="In",{sell_cell}),"Sell","Hold"))')
+        position = (f'=IF(AND({prev_pos_ref}="Out",{buy_cell}),"In",'
+                    f'IF(AND({prev_pos_ref}="In",{sell_cell}),"Out",{prev_pos_ref}))')
     return position, action
 
 
@@ -453,13 +469,14 @@ def build_workbook(
     sell_pct: float,
     buy_direction: str,
     sell_direction: str,
+    repeat_flag: bool = False,
 ):
     """Returns an openpyxl Workbook with every calculated cell as a live formula."""
     if indicator_name not in INDICATOR_SPECS:
         raise ValueError(f"Unknown indicator: {indicator_name}")
 
     wb = Workbook()
-    _build_settings_sheet(wb, window, buy_pct, sell_pct, buy_direction, sell_direction)
+    _build_settings_sheet(wb, window, buy_pct, sell_pct, buy_direction, sell_direction, repeat_flag)
     ws = wb.create_sheet("Results")
 
     raw_cols = [c for c in RAW_COL_ORDER if c in df_raw.columns]
@@ -512,7 +529,7 @@ def build_workbook(
         prev_pos_ref = '"Out"' if r == 2 else f'{L["Position (calc)"]}{r-1}'
         buy_cell = f'{L["Buy Condition"]}{r}'
         sell_cell = f'{L["Sell Condition"]}{r}'
-        pos_f, act_f = _state_machine_formulas(r, buy_cell, sell_cell, prev_pos_ref)
+        pos_f, act_f = _state_machine_formulas(r, buy_cell, sell_cell, prev_pos_ref, repeat_flag)
         ws.cell(row=r, column=all_cols.index("Position (calc)") + 1, value=pos_f).font = BLACK
         ws.cell(row=r, column=all_cols.index("Action (calc)") + 1, value=act_f).font = BLACK
 
