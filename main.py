@@ -334,7 +334,7 @@ if last_px is not None:
     price_bar_placeholder.markdown(
         f'<div class="price-bar">'
         f'<span>Price per share ({short_sym})</span>'
-        f'<span class="price-val">£{last_px:.4f}</span>'
+        f'<span class="price-val">£{last_px}</span>'
         f'</div>',
         unsafe_allow_html=True,
     )
@@ -432,16 +432,6 @@ if run_btn or True:
 
     show_df = df_result[display_cols].copy()
 
-    # Format numeric columns
-    numeric_display = [
-        c for c in show_df.columns
-        if pd.api.types.is_float_dtype(show_df[c]) and "Condition" not in c
-    ]
-    for c in numeric_display:
-        show_df[c] = show_df[c].map(
-            lambda x: f"{x:.4f}" if pd.notna(x) else ""
-        )
-
     MAX_CELLS = 262_144
     total_cells = show_df.shape[0] * show_df.shape[1]
 
@@ -461,9 +451,9 @@ if run_btn or True:
                     unsafe_allow_html=True)
         trades_df = pd.DataFrame({
             "#":          range(1, pnl["trades"] + 1),
-            "Buy Price":  [f"{b:.4f}" for b in pnl["buys"]],
-            "Sell Price": [f"{s:.4f}" for s in pnl["sells"]],
-            "P&L (£)":    [f"{p:+.4f}" for p in pnl["pnl_list"]],
+            "Buy Price":  pnl["buys"],
+            "Sell Price": pnl["sells"],
+            "P&L (£)":    pnl["pnl_list"],
         })
         st.dataframe(trades_df, use_container_width=True, hide_index=True)
     else:

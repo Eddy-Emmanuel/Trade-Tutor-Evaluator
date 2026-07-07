@@ -1,16 +1,7 @@
 # utils/pipeline.py
 
-from decimal import Decimal, ROUND_HALF_UP
-
 import pandas as pd
 from indicators.engine import run_indicator
-
-
-def _round4(value):
-    if pd.isna(value):
-        return value
-    return float(Decimal(str(value)).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP))
-
 
 # ── Status column ─────────────────────────────────────────────────────────────
 def compute_status(df: pd.DataFrame) -> pd.Series:
@@ -68,10 +59,11 @@ def build_result_df(
     )
 
     df = df_raw.copy()
-    df[result["indicator_col"]] = result["indicator_vals"].apply(_round4)
+    df[result["indicator_col"]] = result["indicator_vals"]
 
     for col_name, col_series in result["extra_cols"].items():
-        df[col_name] = col_series if "Condition" in col_name else col_series.apply(_round4)
+        df[col_name] = col_series
+        
     df["Position (calc)"] = result["position"]
     df["Action (calc)"]   = result["action"]
     df["Status"]          = compute_status(df)
