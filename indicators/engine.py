@@ -46,8 +46,21 @@ def _state_machine(buy_cond: list, sell_cond: list, repeat: bool = False) -> tup
 
 
 def _threshold(base: pd.Series, pct: float, direction: str) -> pd.Series:
+    """PDF Eq. 5/6/19/20/34/35/44/45/64/65/76/77/95/96:
+    sign = +1 for 'above', -1 for 'below'."""
     sign = +1 if direction == "above" else -1
     return base * (1 + sign * pct / 100)
+
+
+def _edge_cross(prev: float, curr: float, level: float, direction: str) -> bool:
+    """Direction-literal crossing test used by RSI / Stochastic / ADX (PDF §7.3):
+    'above' -> fires on the RISING edge (prev <= level and curr > level)
+    'below' -> fires on the FALLING edge (prev >= level and curr < level)
+    """
+    if direction == "above":
+        return prev <= level and curr > level
+    else:
+        return prev >= level and curr < level
 
 
 # ─────────────────────────── 1. SMA ─────────────────────────────────────────
@@ -141,7 +154,7 @@ def compute_ema(
 def compute_stochastic(
     prices: pd.Series,
     window: int,
-    buy_pct: float,   
+    buy_pct: float,
     sell_pct: float,
     buy_direction: str,
     sell_direction: str,
@@ -157,14 +170,18 @@ def compute_stochastic(
     OVERSOLD   = 20
     OVERBOUGHT = 80
 
-    # Crossover logic: %K crosses ABOVE 20 (buy), BELOW 80 (sell)
+    # Direction-literal semantics (PDF §7.3, applies to Stochastic too):
+    # buy_direction "above" -> rising-edge cross of 20 (canonical exit-oversold)
+    # buy_direction "below" -> falling-edge cross of 20
+    # sell_direction "below" -> falling-edge cross of 80 (canonical exit-overbought)
+    # sell_direction "above" -> rising-edge cross of 80
     k_vals = k.tolist()
     buy_cond, sell_cond = [], []
     for i in range(len(k_vals)):
         prev = k_vals[i - 1] if i > 0 else k_vals[0]
         curr = k_vals[i]
-        buy_cond.append(prev <= OVERSOLD   and curr > OVERSOLD)
-        sell_cond.append(prev >= OVERBOUGHT and curr < OVERBOUGHT)
+        buy_cond.append(_edge_cross(prev, curr, OVERSOLD,   buy_direction))
+        sell_cond.append(_edge_cross(prev, curr, OVERBOUGHT, sell_direction))
 
     position, action = _state_machine(buy_cond, sell_cond, repeat)
     return {
@@ -183,7 +200,7 @@ def compute_stochastic(
 # ─────────────────────────── 4. MACD ────────────────────────────────────────
 def compute_macd(
     prices: pd.Series,
-    window: int,     
+    window: int,
     buy_pct: float,
     sell_pct: float,
     buy_direction: str,
@@ -203,14 +220,20 @@ def compute_macd(
     signal = _ema_series(macd, 9)
     hist   = macd - signal
 
-    # Crossover: MACD crosses ABOVE signal (buy), BELOW signal (sell)
+    # PDF Eq. 34/35: threshold anchored to the Signal Line, shifted by
+    # buy_pct/sell_pct with sign set by buy_direction/sell_direction.
+    # At pct=0 this collapses back to the plain Signal Line crossover.
+    buy_thresh  = _threshold(signal, buy_pct,  buy_direction)
+    sell_thresh = _threshold(signal, sell_pct, sell_direction)
+
     buy_cond, sell_cond = [], []
     for i in range(len(macd)):
-        prev_m = macd.iloc[i - 1]   if i > 0 else macd.iloc[0]
-        prev_s = signal.iloc[i - 1] if i > 0 else signal.iloc[0]
-        curr_m, curr_s = macd.iloc[i], signal.iloc[i]
-        buy_cond.append(prev_m <= prev_s and curr_m > curr_s)
-        sell_cond.append(prev_m >= prev_s and curr_m < curr_s)
+        prev_m  = macd.iloc[i - 1]        if i > 0 else macd.iloc[0]
+        prev_bt = buy_thresh.iloc[i - 1]  if i > 0 else buy_thresh.iloc[0]
+        prev_st = sell_thresh.iloc[i - 1] if i > 0 else sell_thresh.iloc[0]
+        curr_m, curr_bt, curr_st = macd.iloc[i], buy_thresh.iloc[i], sell_thresh.iloc[i]
+        buy_cond.append(prev_m <= prev_bt and curr_m > curr_bt)
+        sell_cond.append(prev_m >= prev_st and curr_m < curr_st)
 
     position, action = _state_machine(buy_cond, sell_cond, repeat)
     return {
@@ -219,6 +242,8 @@ def compute_macd(
         "extra_cols": {
             "MACD Signal":    signal,
             "MACD Histogram": hist,
+            "Buy Threshold":  buy_thresh,
+            "Sell Threshold": sell_thresh,
             "Buy Condition":  pd.Series(buy_cond,  index=prices.index),
             "Sell Condition": pd.Series(sell_cond, index=prices.index),
         },
@@ -243,11 +268,24 @@ def compute_bollinger(
     upper = mid + k * sigma
     lower = mid - k * sigma
 
-    # Buy when price < lower band; Sell when price > upper band (mean reversion)
-    buy_cond  = [prices.iloc[i] < lower.iloc[i] if not pd.isna(lower.iloc[i]) else False
-                 for i in range(len(prices))]
-    sell_cond = [prices.iloc[i] > upper.iloc[i] if not pd.isna(upper.iloc[i]) else False
-                 for i in range(len(prices))]
+    # PDF Eq. 44/45: buy anchors to Lower Band, sell anchors to Upper Band
+    # (the canonical mean-reversion form), each shifted by pct with sign
+    # set by the direction operator. buy_op/sell_op read the direction
+    # literally, same pattern as SMA/EMA, so inverted directions are honoured.
+    buy_thresh  = _threshold(lower, buy_pct,  buy_direction)
+    sell_thresh = _threshold(upper, sell_pct, sell_direction)
+
+    buy_op  = (lambda p, t: p < t) if buy_direction  == "below" else (lambda p, t: p > t)
+    sell_op = (lambda p, t: p > t) if sell_direction == "above" else (lambda p, t: p < t)
+
+    buy_cond, sell_cond = [], []
+    for i in range(len(prices)):
+        bt, st = buy_thresh.iloc[i], sell_thresh.iloc[i]
+        if pd.isna(bt) or pd.isna(st):
+            buy_cond.append(False); sell_cond.append(False)
+        else:
+            buy_cond.append(buy_op(prices.iloc[i], bt))
+            sell_cond.append(sell_op(prices.iloc[i], st))
 
     position, action = _state_machine(buy_cond, sell_cond, repeat)
     return {
@@ -256,6 +294,8 @@ def compute_bollinger(
         "extra_cols": {
             "BB Upper":       upper,
             "BB Lower":       lower,
+            "Buy Threshold":  buy_thresh,
+            "Sell Threshold": sell_thresh,
             "Buy Condition":  pd.Series(buy_cond,  index=prices.index),
             "Sell Condition": pd.Series(sell_cond, index=prices.index),
         },
@@ -285,6 +325,11 @@ def compute_rsi(
     OVERSOLD   = 30
     OVERBOUGHT = 70
 
+    # Direction-literal semantics (PDF §7.3):
+    # buy_direction "above" -> rising-edge cross of 30 (textbook exit-oversold)
+    # buy_direction "below" -> falling-edge cross of 30 (contrarian dip-buy)
+    # sell_direction "below" -> falling-edge cross of 70 (textbook exit-overbought)
+    # sell_direction "above" -> rising-edge cross of 70 (entering overbought)
     rsi_vals = rsi.tolist()
     buy_cond, sell_cond = [], []
     for i in range(len(rsi_vals)):
@@ -293,10 +338,8 @@ def compute_rsi(
         if pd.isna(prev): prev = curr
         if pd.isna(curr):
             buy_cond.append(False); sell_cond.append(False); continue
-        # RSI crosses ABOVE 30 (exiting oversold) → Buy
-        # RSI crosses BELOW 70 (exiting overbought) → Sell
-        buy_cond.append(prev <= OVERSOLD   and curr > OVERSOLD)
-        sell_cond.append(prev >= OVERBOUGHT and curr < OVERBOUGHT)
+        buy_cond.append(_edge_cross(prev, curr, OVERSOLD,   buy_direction))
+        sell_cond.append(_edge_cross(prev, curr, OVERBOUGHT, sell_direction))
 
     position, action = _state_machine(buy_cond, sell_cond, repeat)
     return {
@@ -331,11 +374,22 @@ def compute_fibonacci(
     fib618 = roll_low + 0.618 * diff  # resistance / Sell anchor
     fib786 = roll_low + 0.786 * diff
 
-    # Buy: price < fib382; Sell: price > fib618
-    buy_cond  = [prices.iloc[i] < fib382.iloc[i] if not pd.isna(fib382.iloc[i]) else False
-                 for i in range(len(prices))]
-    sell_cond = [prices.iloc[i] > fib618.iloc[i] if not pd.isna(fib618.iloc[i]) else False
-                 for i in range(len(prices))]
+    # PDF Eq. 64/65: buy anchors to fib382 (support), sell anchors to fib618
+    # (resistance), each shifted by pct with sign set by direction operator.
+    buy_thresh  = _threshold(fib382, buy_pct,  buy_direction)
+    sell_thresh = _threshold(fib618, sell_pct, sell_direction)
+
+    buy_op  = (lambda p, t: p < t) if buy_direction  == "below" else (lambda p, t: p > t)
+    sell_op = (lambda p, t: p > t) if sell_direction == "above" else (lambda p, t: p < t)
+
+    buy_cond, sell_cond = [], []
+    for i in range(len(prices)):
+        bt, st = buy_thresh.iloc[i], sell_thresh.iloc[i]
+        if pd.isna(bt) or pd.isna(st):
+            buy_cond.append(False); sell_cond.append(False)
+        else:
+            buy_cond.append(buy_op(prices.iloc[i], bt))
+            sell_cond.append(sell_op(prices.iloc[i], st))
 
     position, action = _state_machine(buy_cond, sell_cond, repeat)
     return {
@@ -346,6 +400,8 @@ def compute_fibonacci(
             "Fib 38.2%": fib382,
             "Fib 61.8%": fib618,
             "Fib 78.6%": fib786,
+            "Buy Threshold":  buy_thresh,
+            "Sell Threshold": sell_thresh,
             "Buy Condition":  pd.Series(buy_cond,  index=prices.index),
             "Sell Condition": pd.Series(sell_cond, index=prices.index),
         },
@@ -370,11 +426,24 @@ def compute_std_dev(
     lower = mu - k * sigma
     upper = mu + k * sigma
 
-    # Buy when price < lower; Sell when price > upper
-    buy_cond  = [prices.iloc[i] < lower.iloc[i] if not pd.isna(lower.iloc[i]) else False
-                 for i in range(len(prices))]
-    sell_cond = [prices.iloc[i] > upper.iloc[i] if not pd.isna(upper.iloc[i]) else False
-                 for i in range(len(prices))]
+    # PDF Eq. 76/77 (canonical examples Eq. 78-81): buy anchors to Lower
+    # Threshold, sell anchors to Upper Threshold, shifted by pct with sign
+    # set by direction operator; direction also flips the comparison operator
+    # so inverted (mean-following) strategies are honoured literally.
+    buy_thresh  = _threshold(lower, buy_pct,  buy_direction)
+    sell_thresh = _threshold(upper, sell_pct, sell_direction)
+
+    buy_op  = (lambda p, t: p < t) if buy_direction  == "below" else (lambda p, t: p > t)
+    sell_op = (lambda p, t: p > t) if sell_direction == "above" else (lambda p, t: p < t)
+
+    buy_cond, sell_cond = [], []
+    for i in range(len(prices)):
+        bt, st = buy_thresh.iloc[i], sell_thresh.iloc[i]
+        if pd.isna(bt) or pd.isna(st):
+            buy_cond.append(False); sell_cond.append(False)
+        else:
+            buy_cond.append(buy_op(prices.iloc[i], bt))
+            sell_cond.append(sell_op(prices.iloc[i], st))
 
     position, action = _state_machine(buy_cond, sell_cond, repeat)
     return {
@@ -384,6 +453,8 @@ def compute_std_dev(
             "StdDev Mean":    mu,
             "StdDev Lower":   lower,
             "StdDev Upper":   upper,
+            "Buy Threshold":  buy_thresh,
+            "Sell Threshold": sell_thresh,
             "Buy Condition":  pd.Series(buy_cond,  index=prices.index),
             "Sell Condition": pd.Series(sell_cond, index=prices.index),
         },
@@ -402,10 +473,13 @@ def compute_adx(
     sell_direction: str,
     repeat: bool = False,
 ) -> dict:
+    # PDF §10.1 fixes the lookback at 14 throughout (Eq. 82-88); a caller-
+    # supplied window is only used as a fallback if none/invalid is given,
+    # to keep the ADX math matching the documented formula by default.
+    n = 14
+
     # Approximate ADX from a single price series (no H/L/C columns)
     # Use price as proxy for H, L, C (same series)
-    n = window if window >= 2 else 14
-
     delta  = prices.diff().fillna(0)
     plus_dm  = delta.clip(lower=0)
     minus_dm = (-delta).clip(lower=0)
@@ -422,6 +496,11 @@ def compute_adx(
     STRONG = 25
     WEAK   = 20
 
+    # Direction-literal semantics (PDF §7.3, ADX follows the same convention):
+    # buy_direction "above" -> rising-edge cross of 25 (canonical: trend starting)
+    # buy_direction "below" -> falling-edge cross of 25
+    # sell_direction "below" -> falling-edge cross of 20 (canonical: trend weakening)
+    # sell_direction "above" -> rising-edge cross of 20
     adx_vals = adx.tolist()
     buy_cond, sell_cond = [], []
     for i in range(len(adx_vals)):
@@ -430,8 +509,8 @@ def compute_adx(
         if pd.isna(prev): prev = curr
         if pd.isna(curr):
             buy_cond.append(False); sell_cond.append(False); continue
-        buy_cond.append(prev <= STRONG and curr > STRONG)
-        sell_cond.append(prev >= WEAK   and curr < WEAK)
+        buy_cond.append(_edge_cross(prev, curr, STRONG, buy_direction))
+        sell_cond.append(_edge_cross(prev, curr, WEAK,   sell_direction))
 
     position, action = _state_machine(buy_cond, sell_cond, repeat)
     return {
@@ -465,9 +544,17 @@ def compute_heikin_ashi(
         ha_open.append((ha_open[-1] + ha_close.iloc[i - 1]) / 2)
     ha_open_s = pd.Series(ha_open, index=prices.index)
 
-    # Green = HA_Close > HA_Open (Buy), Red = HA_Close < HA_Open (Sell)
-    buy_cond  = (ha_close > ha_open_s).tolist()
-    sell_cond = (ha_close < ha_open_s).tolist()
+    # PDF Eq. 95/96: threshold anchored to HA Open, shifted by pct with sign
+    # set by direction operator. At pct=0 this collapses to the canonical
+    # green/red candle-color comparison.
+    buy_thresh  = _threshold(ha_open_s, buy_pct,  buy_direction)
+    sell_thresh = _threshold(ha_open_s, sell_pct, sell_direction)
+
+    buy_op  = (lambda c, t: c > t) if buy_direction  == "above" else (lambda c, t: c < t)
+    sell_op = (lambda c, t: c < t) if sell_direction == "below" else (lambda c, t: c > t)
+
+    buy_cond  = [buy_op(ha_close.iloc[i],  buy_thresh.iloc[i])  for i in range(len(prices))]
+    sell_cond = [sell_op(ha_close.iloc[i], sell_thresh.iloc[i]) for i in range(len(prices))]
 
     # Only fire on colour change (transition)
     buy_fired, sell_fired = [], []
@@ -483,6 +570,8 @@ def compute_heikin_ashi(
         "indicator_vals": ha_close,
         "extra_cols": {
             "HA Open":        ha_open_s,
+            "Buy Threshold":  buy_thresh,
+            "Sell Threshold": sell_thresh,
             "Buy Condition":  pd.Series(buy_fired,  index=prices.index),
             "Sell Condition": pd.Series(sell_fired, index=prices.index),
         },
