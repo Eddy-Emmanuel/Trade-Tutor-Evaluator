@@ -622,4 +622,10 @@ def run_indicator(
     fn = INDICATOR_MAP.get(indicator_name)
     if fn is None:
         raise ValueError(f"Unknown indicator: {indicator_name}")
-    return fn(prices, window, buy_pct, sell_pct, buy_direction, sell_direction, repeat)
+    return fn(prices=prices, 
+              window=window,
+              buy_pct=buy_pct, 
+              sell_pct=sell_pct, 
+              buy_direction=buy_direction,
+              sell_direction=sell_direction, 
+              repeat=repeat)
