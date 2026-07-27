@@ -3,3 +3,6 @@ pandas
 openpyxl
 plotly
 numpy
+fastapi
+pydantic
+uvicorn
