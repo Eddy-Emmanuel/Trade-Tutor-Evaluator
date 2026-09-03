@@ -291,7 +291,7 @@ with st.sidebar:
     if spec["uses_pct"]:
         buy_pct = st.number_input(
             "How Much (%) ⓘ", min_value=0.0, max_value=100.0,
-            value=0.05, step=0.01, format="%.4f", key="buy_pct",
+            value=0.0, step=0.01, format="%.4f", key="buy_pct",
             help="Percentage offset applied to the indicator to form the buy threshold.",
         )
     else:
@@ -338,14 +338,18 @@ with st.sidebar:
     if spec["uses_pct"]:
         sell_pct = st.number_input(
             "How Much (%) ⓘ", min_value=0.0, max_value=100.0,
-            value=0.05, step=0.01, format="%.4f", key="sell_pct",
+            value=0.0, step=0.01, format="%.4f", key="sell_pct",
         )
     else:
         sell_pct = 0.0
     _render_slot(indicator_name, "sell", params)
 
+    # §12: Sell Quantity is locked to Buy Quantity. The field is visible but
+    # disabled, and the value is always derived from buy_qty at run time.
     sell_qty = st.number_input(
-        "Sell Quantity ⓘ", min_value=1, value=500, step=1, key="sell_qty",
+        "Sell Quantity ⓘ", min_value=1, value=buy_qty, step=1, key="sell_qty",
+        disabled=True,
+        help="Locked to Buy Quantity (§12 — the engine enforces equal lot sizes).",
     )
 
     # ── Date / time window ────────────────────────────────────────────────────
@@ -503,20 +507,32 @@ except Exception as e:
     st.error(f"Calculation error: {e}")
     st.stop()
 
-pnl = compute_pnl(df_result, price_col, buy_qty, sell_qty, sell_price_col=sell_col)
+# §12: sell_qty is always equal to buy_qty.
+pnl = compute_pnl(df_result, price_col, buy_qty, sell_qty=buy_qty, sell_price_col=sell_col)
 
 # ── Warm-up notice ─────────────────────────────────────────────────────────────
 warmup = int(df_result.attrs.get("warmup", 0))
 if warmup >= len(df_result):
     st.error(
-        f"The lookback needs {warmup:,} rows to become defined, but only "
-        f"{len(df_result):,} are in the selected window. Every row is held — "
-        "shorten the period or widen the date range."
+        f"**Warm-up exceeds available data.** The lookback needs **{warmup:,} rows** "
+        f"to become defined, but the selected window contains only **{len(df_result):,} rows**. "
+        "No signals can fire — extend the date/time range or reduce the period. "
+        f"P&L = £0 is the correct result for this configuration."
     )
 elif warmup > 0:
     st.caption(
-        f"Warm-up: the first {warmup:,} row(s) are held at Out / Hold because "
-        f"the lookback is not satisfied yet. Signals start at row {warmup + 1:,}."
+        f"Warm-up: the first {warmup:,} row(s) are held at Out / Hold while the "
+        f"lookback is being established. Signals start at row {warmup + 1:,}. "
+        "Extend the date range if you need more signal rows."
+    )
+
+# ── Undefined-operand notice (§1.5) ────────────────────────────────────────────
+undef = int(df_result.attrs.get("undefined_bars", 0))
+if undef > 0:
+    total = len(df_result)
+    st.caption(
+        f"ℹ️ {undef:,} of {total:,} bar(s) had an undefined operand (e.g. flat "
+        "window, NaN price) and produced no signal."
     )
 
 # ── KPI cards ──────────────────────────────────────────────────────────────────

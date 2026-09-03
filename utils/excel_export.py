@@ -73,11 +73,9 @@ PARAM_LABELS = {
     "fast_window": "Fast EMA Period",
     "slow_window": "Slow EMA Period",
     "signal_window": "Signal EMA Period",
-    "k": "Band k",
-    "ddof": "Sigma denominator (0=population, 1=sample)",
+    "k": "Band k (σ uses population denominator)",
     "buy_level": "Buy anchor level",
     "sell_level": "Sell anchor level",
-    "transition_only": "Signal on colour change only",
 }
 
 
@@ -295,11 +293,23 @@ def _stochastic_spec(S):
     ]
 
 
-def _macd_spec(S):
+def _macd_spec(S, sigma_hist_vals: list | None = None):
+    """MACD column spec.
+
+    sigma_hist_vals is an optional list of per-row (0-based) σ_hist values
+    produced by the Python engine. When provided, the Buy/Sell Threshold
+    columns use the §5.3 additive formula:
+        threshold = Signal ± (pct/100) × σ_hist
+    baked as static numbers per row (static-values approach approved).
+    When None (legacy), the threshold falls back to Signal (plain crossover).
+    """
     fast = S.get("fast_window", "12")
     slow = S.get("slow_window", "26")
     sig = S.get("signal_window", "9")
     warm = f"{slow}+{sig}-1"
+
+    # Pre-index sigma values by data row (row 2 = index 0 in sigma_hist_vals).
+    _sigma = sigma_hist_vals or []
 
     def ema_fast(r, L):
         if r == 2:
@@ -323,16 +333,34 @@ def _macd_spec(S):
         prev = f'{L["MACD Signal"]}{r-1}'
         return f'=(2/({sig}+1))*{m}+(1-(2/({sig}+1)))*{prev}'
 
+    def hist(r, L):
+        # §5.1: Histogram is computed but hidden from output.
+        return f'={L["MACD (calc)"]}{r}-{L["MACD Signal"]}{r}'
+
     def buyt(r, L):
+        # §5.3 Eq. 34: additive, σ_hist-scaled. At pct=0 → Signal itself.
         s = f'{L["MACD Signal"]}{r}'
-        return f'={s}*(1+IF({BUYDIR}="above",1,-1)*{BUYPCT}/100)'
+        idx = r - 2
+        if _sigma and idx < len(_sigma):
+            import math
+            sv = _sigma[idx]
+            sv = 0.0 if (sv is None or (isinstance(sv, float) and math.isnan(sv))) else float(sv)
+            sign = f'IF({BUYDIR}="above",1,-1)'
+            return f'={s}+({sign})*({BUYPCT}/100)*{sv}'
+        # pct=0 fallback: plain Signal line (canonical crossover).
+        return f'={s}'
 
     def sellt(r, L):
+        # §5.3 Eq. 35: additive, σ_hist-scaled. At pct=0 → Signal itself.
         s = f'{L["MACD Signal"]}{r}'
-        return f'={s}*(1+IF({SELLDIR}="above",1,-1)*{SELLPCT}/100)'
-
-    def hist(r, L):
-        return f'={L["MACD (calc)"]}{r}-{L["MACD Signal"]}{r}'
+        idx = r - 2
+        if _sigma and idx < len(_sigma):
+            import math
+            sv = _sigma[idx]
+            sv = 0.0 if (sv is None or (isinstance(sv, float) and math.isnan(sv))) else float(sv)
+            sign = f'IF({SELLDIR}="above",1,-1)'
+            return f'={s}+({sign})*({SELLPCT}/100)*{sv}'
+        return f'={s}'
 
     def buyc(r, L):
         if r == 2:
@@ -353,7 +381,7 @@ def _macd_spec(S):
         ("EMA Slow (helper)", True, ema_slow),
         ("MACD (calc)", False, macd),
         ("MACD Signal", False, signal),
-        ("MACD Histogram", False, hist),
+        ("MACD Histogram (hidden)", True, hist),   # §5.1: hidden from output
         ("Buy Threshold", False, buyt),
         ("Sell Threshold", False, sellt),
         ("Buy Condition", False, buyc),
@@ -361,15 +389,11 @@ def _macd_spec(S):
     ]
 
 
-def _std_formula(rng, ddof_ref):
-    """STDEVP or STDEV depending on the σ denominator setting."""
-    return f'IF({ddof_ref}=0,STDEVP({rng}),STDEV({rng}))'
-
-
 def _bollinger_spec(S):
+    # §6.1: population σ (ddof=0) enforced. Excel STDEVP = population σ.
+    # The Sample (n−1) option has been removed; ddof is no longer a setting.
     warm = f"{WIN}-1"
     kband = S.get("k", "2")
-    ddof = S.get("ddof", "0")
 
     def mid(r, L):
         p = f'{L["price"]}{r}'
@@ -377,11 +401,11 @@ def _bollinger_spec(S):
 
     def upper(r, L):
         p = f'{L["price"]}{r}'; m = f'{L["BB Middle (calc)"]}{r}'
-        return f'=IF({m}="","",{m}+{kband}*{_std_formula(_offset(p), ddof)})'
+        return f'=IF({m}="","",{m}+{kband}*STDEVP({_offset(p)}))'
 
     def lower(r, L):
         p = f'{L["price"]}{r}'; m = f'{L["BB Middle (calc)"]}{r}'
-        return f'=IF({m}="","",{m}-{kband}*{_std_formula(_offset(p), ddof)})'
+        return f'=IF({m}="","",{m}-{kband}*STDEVP({_offset(p)}))'
 
     def buyt(r, L):
         lo = f'{L["BB Lower"]}{r}'
@@ -434,9 +458,13 @@ def _rsi_spec(S):
         return f'=IF(COUNT({off})<{WIN},"",AVERAGE({off}))'
 
     def rsi(r, L):
+        # §1.5 degenerate cases:
+        #   Avg Loss = 0 AND Avg Gain > 0  →  RSI = 100
+        #   Avg Loss = 0 AND Avg Gain = 0  →  RSI = 50
         ag = f'{L["Avg Gain (helper)"]}{r}'; al = f'{L["Avg Loss (helper)"]}{r}'
         return (f'=IF(OR({ag}="",{al}=""),"",'
-                f'IF({al}=0,"",100-100/(1+{ag}/{al})))')
+                f'IF({al}=0,IF({ag}>0,100,50),'
+                f'100-100/(1+{ag}/{al})))')
 
     def buyc(r, L):
         if r == 2:
@@ -516,14 +544,14 @@ def _fibonacci_spec(S):
 
 
 def _stddev_spec(S):
+    # §9.1: population σ (ddof=0) enforced. Excel STDEVP = population σ.
     warm = f"{WIN}-1"
     kband = S.get("k", "2")
-    ddof = S.get("ddof", "0")
     SIG = "Std Dev σ (calc)"        # single space — matches the engine's column
 
     def sigma(r, L):
         p = f'{L["price"]}{r}'
-        return f'=IF((ROW()-1)<{WIN},"",{_std_formula(_offset(p), ddof)})'
+        return f'=IF((ROW()-1)<{WIN},"",STDEVP({_offset(p)}))'
 
     def mu(r, L):
         p = f'{L["price"]}{r}'
@@ -643,8 +671,9 @@ def _adx_spec(S):
 
 
 def _heikin_ashi_spec(S):
-    warm = "1"                      # row 0's HA Open is a seed, not a candle
-    trans = S.get("transition_only", "TRUE")
+    # §1.3, §11.3: HA is a level-mode indicator — fires on every qualifying
+    # bar, not only the first of a run. transition_only has been removed.
+    warm = "1"   # row 0's HA Open is the seed, not a computed candle.
 
     def haclose(r, L):
         return f'={L["price"]}{r}'
@@ -664,22 +693,18 @@ def _heikin_ashi_spec(S):
         return f'={o}*(1+IF({SELLDIR}="above",1,-1)*{SELLPCT}/100)'
 
     def buyc(r, L):
-        c = f'{L["HA Close (calc)"]}{r}'; bt = f'{L["Buy Threshold"]}{r}'
-        now = f'IF({BUYDIR}="above",{c}>{bt},{c}<{bt})'
         if r == 2:
             return "=FALSE"
-        pc = f'{L["HA Close (calc)"]}{r-1}'; pbt = f'{L["Buy Threshold"]}{r-1}'
-        prev = f'IF({BUYDIR}="above",{pc}>{pbt},{pc}<{pbt})'
-        return _gate(warm, f'IF({trans},AND({now},NOT({prev})),{now})')
+        c = f'{L["HA Close (calc)"]}{r}'; bt = f'{L["Buy Threshold"]}{r}'
+        cond = f'IF({BUYDIR}="above",{c}>{bt},{c}<{bt})'
+        return _gate(warm, cond)
 
     def sellc(r, L):
-        c = f'{L["HA Close (calc)"]}{r}'; st = f'{L["Sell Threshold"]}{r}'
-        now = f'IF({SELLDIR}="below",{c}<{st},{c}>{st})'
         if r == 2:
             return "=FALSE"
-        pc = f'{L["HA Close (calc)"]}{r-1}'; pst = f'{L["Sell Threshold"]}{r-1}'
-        prev = f'IF({SELLDIR}="below",{pc}<{pst},{pc}>{pst})'
-        return _gate(warm, f'IF({trans},AND({now},NOT({prev})),{now})')
+        c = f'{L["HA Close (calc)"]}{r}'; st = f'{L["Sell Threshold"]}{r}'
+        cond = f'IF({SELLDIR}="below",{c}<{st},{c}>{st})'
+        return _gate(warm, cond)
 
     return [
         ("HA Close (calc)", False, haclose),
@@ -727,6 +752,10 @@ def build_workbook(
         raise ValueError(f"Unknown indicator: {indicator_name}")
 
     params = dict(params or {})
+
+    # §7a: remove ddof from params so it is not written to Settings (removed option).
+    params.pop("ddof", None)
+
     wb = Workbook()
     S = _build_settings_sheet(
         wb, window, buy_pct, sell_pct, buy_direction, sell_direction,
@@ -735,7 +764,38 @@ def build_workbook(
     ws = wb.create_sheet("Results")
 
     raw_cols = [c for c in RAW_COL_ORDER if c in df_raw.columns]
-    spec = INDICATOR_SPECS[indicator_name](S)
+
+    # §5.3: for MACD, pre-compute σ_hist (20-bar population std-dev of the
+    # histogram) from the raw price series so the Excel threshold columns can
+    # embed the per-row σ as static values (static-values approach approved).
+    sigma_hist_vals: list | None = None
+    if indicator_name == "MACD":
+        import numpy as np
+        import pandas as pd
+        _prices = df_raw[price_col].copy()
+        _fast = int(params.get("fast_window", 12))
+        _slow = int(params.get("slow_window", 26))
+        _sig  = int(params.get("signal_window", 9))
+        _a_f, _a_s, _a_g = 2/(_fast+1), 2/(_slow+1), 2/(_sig+1)
+        _ef = [float(_prices.iloc[0])]
+        _es = [float(_prices.iloc[0])]
+        for _p in _prices.iloc[1:]:
+            _ef.append(_a_f * float(_p) + (1 - _a_f) * _ef[-1])
+            _es.append(_a_s * float(_p) + (1 - _a_s) * _es[-1])
+        _macd_s = pd.Series([f - s for f, s in zip(_ef, _es)], index=_prices.index)
+        _sig_s  = pd.Series([float(_macd_s.iloc[0])], index=[_prices.index[0]])
+        _sv = [float(_macd_s.iloc[0])]
+        for _v in _macd_s.iloc[1:]:
+            _sv.append(_a_g * float(_v) + (1 - _a_g) * _sv[-1])
+        _sig_s = pd.Series(_sv, index=_prices.index)
+        _hist_s = _macd_s - _sig_s
+        _sigma_s = _hist_s.rolling(window=20).std(ddof=0)
+        sigma_hist_vals = _sigma_s.tolist()
+
+    if indicator_name == "MACD":
+        spec = _macd_spec(S, sigma_hist_vals)
+    else:
+        spec = INDICATOR_SPECS[indicator_name](S)
     calc_names = [name for name, _, _ in spec] + ["Position (calc)", "Action (calc)", "Status"]
     all_cols = raw_cols + calc_names
 

@@ -141,4 +141,8 @@ def build_result_df(
     # Out/Hold by the engine; the UI reports the count so a run that produces
     # no trades because the window swallowed the data is obvious.
     df.attrs["warmup"] = result.get("warmup", 0)
+    # §1.5: bars where a comparison operand was undefined (NaN price, flat
+    # window, etc.). Reported to the user so "no trades" can be distinguished
+    # from "the indicator was blind for most of the run".
+    df.attrs["undefined_bars"] = result.get("undefined_bars", 0)
     return df
