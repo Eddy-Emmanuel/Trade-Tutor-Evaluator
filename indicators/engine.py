@@ -644,18 +644,18 @@ INDICATOR_HINTS = {
 # constant — all are user-overridable, matching TT.
 INDICATOR_SPEC: dict[str, dict] = {
     "Simple Moving Average": {
-        "window": {"label": "Window (Periods)", "default": 2, "min": 2, "max": 500},
+        "window": {"label": "Window (Periods)", "default": 20, "min": 2, "max": 500},
         "uses_pct": True,
         "fields": [],
     },
     "Exponential Moving Average": {
-        "window": {"label": "Window (Periods)", "default": 2, "min": 2, "max": 500},
+        "window": {"label": "Window (Periods)", "default": 20, "min": 2, "max": 500},
         "uses_pct": True,
         "fields": [],
     },
     "Stochastic Oscillator": {
         "window": {
-            "label": "Lookback Period", "default": 14, "min": 2, "max": 500,
+            "label": "Lookback Period", "default": 14, "min": 5, "max": 500,
             "help": "Periods used for the %K high/low range. The PDF uses 14. "
                     "Very short lookbacks make %K jump between 0 and 100 and "
                     "produce crossings that carry little information.",
@@ -676,15 +676,15 @@ INDICATOR_SPEC: dict[str, dict] = {
         "uses_pct": True,
         "fields": [
             {"key": "fast_window", "label": "Fast EMA Period", "type": "int", "slot": "shared",
-             "default": 12, "min": 1, "max": 200},
+             "default": 12, "min": 2, "max": 200},
             {"key": "slow_window", "label": "Slow EMA Period", "type": "int", "slot": "shared",
-             "default": 26, "min": 2, "max": 400},
+             "default": 26, "min": 3, "max": 400},
             {"key": "signal_window", "label": "Signal EMA Period", "type": "int", "slot": "shared",
-             "default": 9, "min": 1, "max": 200},
+             "default": 9, "min": 2, "max": 200},
         ],
     },
     "Bollinger Bands": {
-        "window": {"label": "Window (Periods)", "default": 20, "min": 2, "max": 500},
+        "window": {"label": "Window (Periods)", "default": 20, "min": 6, "max": 500},
         "uses_pct": True,
         "fields": [
             {"key": "k", "label": "Band Width (k × σ)", "type": "float", "slot": "shared",
@@ -696,7 +696,7 @@ INDICATOR_SPEC: dict[str, dict] = {
     },
     "Relative Strength Index": {
         "window": {
-            "label": "Lookback Period", "default": 14, "min": 2, "max": 500,
+            "label": "Lookback Period", "default": 14, "min": 5, "max": 500,
             "help": "Periods averaged for gains and losses. The PDF uses 14.",
         },
         "uses_pct": False,
