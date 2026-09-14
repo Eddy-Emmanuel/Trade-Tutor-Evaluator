@@ -32,6 +32,14 @@ def load_file(uploaded_file) -> pd.DataFrame:
         elif "ask" in cl and "price" in cl:             rename[c] = "Ask Price"
         elif "bid" in cl and "price" in cl:             rename[c] = "Bid Price"
         elif "mid" in cl and "price" in cl:             rename[c] = "Mid Price"
+        elif cl in ("open", "open_price", "opening_price"):
+            rename[c] = "Open"
+        elif cl in ("high", "high_price"):
+            rename[c] = "High"
+        elif cl in ("low", "low_price"):
+            rename[c] = "Low"
+        elif cl in ("close", "close_price", "closing_price"):
+            rename[c] = "Close"
         elif "moving" in cl and "average" in cl:        rename[c] = "Moving Average"
         elif cl == "position":                          rename[c] = "Position"
         elif cl == "action":                            rename[c] = "Action"
@@ -40,6 +48,7 @@ def load_file(uploaded_file) -> pd.DataFrame:
     keep = [c for c in [
         "S/N", "Symbol", "Transaction Time",
         "Ask Price", "Bid Price", "Mid Price",
+        "Open", "High", "Low", "Close",
         "Moving Average", "Position", "Action",
     ] if c in df.columns]
     df = df[keep].copy()
@@ -47,7 +56,7 @@ def load_file(uploaded_file) -> pd.DataFrame:
     if "Transaction Time" in df.columns:
         df["Transaction Time"] = parse_timestamp(df["Transaction Time"])
 
-    for pc in ["Ask Price", "Bid Price", "Mid Price"]:
+    for pc in ["Ask Price", "Bid Price", "Mid Price", "Open", "High", "Low", "Close"]:
         if pc in df.columns:
             df[pc] = pd.to_numeric(df[pc], errors="coerce")
 
