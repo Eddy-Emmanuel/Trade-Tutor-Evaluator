@@ -115,6 +115,22 @@ def build_result_df(
 
     prices = df_raw[price_col]
 
+    # Preserve real OHLC inputs for indicators that need candle data.
+    # Legacy TT files without OHLC continue to use the selected price series.
+    market_data = {
+        key: df_raw[col]
+        for key, col in {
+            "open": "Open",
+            "high": "High",
+            "low": "Low",
+            "close": "Close",
+        }.items()
+        if col in df_raw.columns
+    }
+
+    indicator_params = dict(params or {})
+    indicator_params["market_data"] = market_data
+
     result = run_indicator(
         indicator_name=indicator_name,
         prices=prices,
@@ -124,7 +140,7 @@ def build_result_df(
         buy_direction=buy_direction,
         sell_direction=sell_direction,
         repeat=repeat_flag,
-        params=params,
+        params=indicator_params,
     )
 
     df = df_raw.copy()
