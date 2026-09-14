@@ -264,16 +264,26 @@ def compute_stochastic(
     oversold: float = 20.0,
     overbought: float = 80.0,
     d_window: int = 3,
+    market_data: dict[str, pd.Series] | None = None,
     **_ignored,
 ) -> dict:
     # %K = (C - L_n) / (H_n - L_n) * 100
-    low_n = prices.rolling(window=window).min()
-    high_n = prices.rolling(window=window).max()
+    # Use real per-bar High/Low/Close when available.
+    # If separate H/L/C data is unavailable, preserve the legacy
+    # single-price fallback.
+    market_data = market_data or {}
+
+    close = market_data.get("close", prices)
+    low = market_data.get("low", prices)
+    high = market_data.get("high", prices)
+
+    low_n = low.rolling(window=window).min()
+    high_n = high.rolling(window=window).max()
     denom = (high_n - low_n).replace(0, np.nan)
 
-    # No .fillna(50). During warm-up %K is undefined and stays NaN; a flat
-    # window (high == low) is also genuinely undefined rather than "neutral".
-    k = (prices - low_n) / denom * 100
+    # During warm-up %K is undefined and stays NaN.
+    # A flat window (H_n == L_n) is also undefined and produces no signal.
+    k = (close - low_n) / denom * 100
     d = k.rolling(window=int(d_window)).mean()
 
     # A crossover needs a valid previous AND current value, so the first row
