@@ -225,9 +225,10 @@ def compute_ema(
     **_ignored,
 ) -> dict:
     ema = _ema_series(prices, window)
-    # The recursion is seeded from row 0, so it produces numbers immediately.
-    # Hold for the same span an SMA of this window would need.
-    warmup = max(int(window) - 1, 0)
+    # EMA is seeded from the first observation, so values exist immediately,
+    # but the Indicator Math Doc treats roughly 3n bars as warm-up before
+    # the recursive estimate is reliable.
+    warmup = max(3 * int(window), 0)
 
     buy_thresh = _threshold(ema, buy_pct, buy_direction)
     sell_thresh = _threshold(ema, sell_pct, sell_direction)
