@@ -688,6 +688,7 @@ def compute_heikin_ashi(
     buy_direction: str = "above",
     sell_direction: str = "below",
     repeat: bool = False,
+    market_data: dict[str, pd.Series] | None = None,
     **_ignored,
 ) -> dict:
     # §1.3, §11.3: HA is a LEVEL-mode indicator. The buy condition fires on
@@ -695,11 +696,28 @@ def compute_heikin_ashi(
     # The transition_only flag has been removed — the state machine (repeat=False)
     # already prevents a second Buy while a position is open, so no additional
     # suppression is needed. With repeat=True every qualifying bar executes.
-    #
-    # With a single price series O=H=L=C=price, so HA Close = price and
-    # HA Open = (prev_HA_Open + prev_HA_Close) / 2.  `window` is unread.
-    ha_close = prices
-    ha_open = [prices.iloc[0]]
+
+    market_data = market_data or {}
+    open_ = market_data.get("open")
+    high = market_data.get("high")
+    low = market_data.get("low")
+    close = market_data.get("close")
+
+    if open_ is not None and close is not None:
+        if high is not None and low is not None:
+            # Full OHLC path from the Indicator Math Doc:
+            # HA Close = (O + H + L + C) / 4
+            ha_close = (open_ + high + low + close) / 4
+        else:
+            # Documented fallback when separate H/L are unavailable.
+            ha_close = (open_ + close) / 2
+
+        # Seed: HA Open(0) = (Open(0) + Close(0)) / 2
+        ha_open = [(open_.iloc[0] + close.iloc[0]) / 2]
+    else:
+        # Legacy single-price fallback: O = H = L = C = price.
+        ha_close = prices
+        ha_open = [prices.iloc[0]]
     for i in range(1, len(prices)):
         ha_open.append((ha_open[-1] + ha_close.iloc[i - 1]) / 2)
     ha_open_s = pd.Series(ha_open, index=prices.index)
