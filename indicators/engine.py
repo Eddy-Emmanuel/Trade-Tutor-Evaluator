@@ -329,9 +329,12 @@ def compute_macd(
     # Histogram computed internally for σ scaling; hidden from output (§5.1).
     hist = macd - signal
 
-    # Slow EMA must mature, then the signal EMA must mature on top of it,
-    # then one more row so a crossover has a real predecessor.
-    warmup = max(int(slow_window) - 1, 0) + max(int(signal_window) - 1, 0) + 1
+    # The Indicator Math Doc treats the recursive slow EMA and the signal EMA
+    # as needing roughly 3x their respective windows before MACD is reliable.
+    warmup = max(
+        3 * int(slow_window) + 3 * int(signal_window),
+        0,
+    )
 
     # §5.3 Eq. 34/35: additive, volatility-scaled threshold.
     # σ_hist = rolling population std-dev of histogram over 20 bars (ddof=0).
@@ -343,8 +346,15 @@ def compute_macd(
     buy_sign  = +1 if buy_direction  == "above" else -1
     sell_sign = +1 if sell_direction == "above" else -1
 
-    buy_thresh  = signal + buy_sign  * (buy_pct  / 100) * sigma_hist
-    sell_thresh = signal + sell_sign * (sell_pct / 100) * sigma_hist
+    if buy_pct == 0:
+        buy_thresh = signal.copy()
+    else:
+        buy_thresh = signal + buy_sign * (buy_pct / 100) * sigma_hist
+
+    if sell_pct == 0:
+        sell_thresh = signal.copy()
+    else:
+        sell_thresh = signal + sell_sign * (sell_pct / 100) * sigma_hist
 
     buy_cond, sell_cond = [], []
     undef = 0
