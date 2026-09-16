@@ -733,8 +733,9 @@ def compute_heikin_ashi(
         ha_open.append((ha_open[-1] + ha_close.iloc[i - 1]) / 2)
     ha_open_s = pd.Series(ha_open, index=prices.index)
 
-    # Row 0's HA Open is the seed; it cannot produce a signal.
-    warmup = 1
+    # Heikin Ashi is recursively seeded, so the Indicator Math Doc treats
+    # roughly the first 10 bars as warm-up before the values are reliable.
+    warmup = 10
 
     # §11.3 Eq. 95/96: threshold anchored to HA Open. At pct=0 this collapses
     # to the canonical HA Close vs HA Open comparison (Green / Red candle).
