@@ -575,17 +575,67 @@ def compute_adx(
     adx_window: int | None = None,
     strong: float = 25.0,
     weak: float = 20.0,
+    market_data: dict[str, pd.Series] | None = None,
     **_ignored,
 ) -> dict:
     # §10.1: 14-period lookback default. `window` unread — ADX has its own period.
     n = int(adx_window) if adx_window else 14
 
-    # Close-only proxy (no per-bar H/L available in single-price series):
-    # price acts as proxy for H, L and C.
-    delta = prices.diff()
-    plus_dm = delta.clip(lower=0)
-    minus_dm = (-delta).clip(lower=0)
-    tr = prices.diff().abs()
+    market_data = market_data or {}
+    high = market_data.get("high")
+    low = market_data.get("low")
+    close = market_data.get("close")
+
+    if high is not None and low is not None and close is not None:
+        # Full OHLC path from the Indicator Math Doc.
+        prev_high = high.shift(1)
+        prev_low = low.shift(1)
+        prev_close = close.shift(1)
+
+        high_low = high - low
+        high_prev_close = (high - prev_close).abs()
+        low_prev_close = (low - prev_close).abs()
+
+        tr = pd.concat(
+            [high_low, high_prev_close, low_prev_close],
+            axis=1,
+        ).max(axis=1)
+
+        up_move = high - prev_high
+        down_move = prev_low - low
+
+        plus_dm = pd.Series(
+            np.where(
+                (up_move > down_move) & (up_move > 0),
+                up_move,
+                0.0,
+            ),
+            index=prices.index,
+            dtype=float,
+        )
+
+        minus_dm = pd.Series(
+            np.where(
+                (down_move > up_move) & (down_move > 0),
+                down_move,
+                0.0,
+            ),
+            index=prices.index,
+            dtype=float,
+        )
+
+        # The first bar has no previous bar, so TR / ±DM are undefined.
+        if len(prices) > 0:
+            tr.iloc[0] = np.nan
+            plus_dm.iloc[0] = np.nan
+            minus_dm.iloc[0] = np.nan
+
+    else:
+        # Legacy close-only fallback when separate High/Low/Close are unavailable.
+        delta = prices.diff()
+        plus_dm = delta.clip(lower=0)
+        minus_dm = (-delta).clip(lower=0)
+        tr = delta.abs()
 
     atr = tr.rolling(window=n).mean()
     plu_avg = plus_dm.rolling(window=n).mean()
