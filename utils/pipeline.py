@@ -166,8 +166,19 @@ def build_result_df(
     for col_name, col_series in result["extra_cols"].items():
         df[col_name] = col_series
 
-    df["Position (calc)"] = result["position"]
+    signal = []
+    for buy_signal, sell_signal in zip(result["buy_cond"], result["sell_cond"]):
+        if buy_signal:
+            signal.append("Buy")
+        elif sell_signal:
+            signal.append("Sell")
+        else:
+            signal.append("Hold")
+
+    df["Signal (calc)"] = signal
     df["Action (calc)"] = result["action"]
+    df["Net Position (calc)"] = result["net_position"]
+    df["Position (calc)"] = result["position"]
     df["Status"] = compute_status(df)
 
     # Leading rows where the lookback is not yet satisfied. These are held at

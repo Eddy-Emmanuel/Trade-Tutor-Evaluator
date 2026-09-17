@@ -60,36 +60,53 @@ import pandas as pd
 
 
 # ─────────────────────────── helpers ────────────────────────────────────────
-def _state_machine(buy_cond: list, sell_cond: list, repeat: bool = False) -> tuple[list, list]:
-    """Universal state machine. Returns (position, action).
+def _state_machine(
+    buy_cond: list,
+    sell_cond: list,
+    repeat: bool = False,
+) -> tuple[list, list, list]:
+    """Universal execution state machine.
 
-    repeat=False (default): alternates Buy -> Sell -> Buy -> Sell.
-                            After a Buy, further Buy signals are ignored until a Sell fires.
-    repeat=True:            reacts to every signal; consecutive Buys or Sells are allowed.
+    Returns:
+        position: legacy In/Out state
+        action: executed Buy/Sell/Hold
+        net_position: number of open lots after each bar
+
+    repeat=False:
+        At most one lot is open. Trades strictly alternate Buy -> Sell.
+
+    repeat=True:
+        Every Buy signal opens one additional lot.
+        Each Sell closes one open lot.
+        A Sell with no open lot is skipped as Hold.
     """
-    position, action = [], []
-    state = "Out"
+    position, action, net_position = [], [], []
+    open_lots = 0
+
     for bc, sc in zip(buy_cond, sell_cond):
         if repeat:
             if bc:
-                state = "In"
+                open_lots += 1
                 action.append("Buy")
-            elif sc:
-                state = "Out"
+            elif sc and open_lots > 0:
+                open_lots -= 1
                 action.append("Sell")
             else:
                 action.append("Hold")
         else:
-            if state == "Out" and bc:
-                state = "In"
+            if open_lots == 0 and bc:
+                open_lots = 1
                 action.append("Buy")
-            elif state == "In" and sc:
-                state = "Out"
+            elif open_lots == 1 and sc:
+                open_lots = 0
                 action.append("Sell")
             else:
                 action.append("Hold")
-        position.append(state)
-    return position, action
+
+        position.append("In" if open_lots > 0 else "Out")
+        net_position.append(open_lots)
+
+    return position, action, net_position
 
 
 def _threshold(base: pd.Series, pct: float, direction: str) -> pd.Series:
@@ -154,7 +171,9 @@ def _finish(
 ) -> dict:
     """Apply warm-up suppression, run the state machine, assemble the result."""
     buy_cond, sell_cond = _blank_warmup(buy_cond, sell_cond, warmup)
-    position, action = _state_machine(buy_cond, sell_cond, repeat)
+    position, action, net_position = _state_machine(
+        buy_cond, sell_cond, repeat
+    )
 
     extra_cols = dict(extra_cols)
     extra_cols["Buy Condition"] = pd.Series(buy_cond, index=index)
@@ -166,6 +185,7 @@ def _finish(
         "extra_cols": extra_cols,
         "position": position,
         "action": action,
+        "net_position": net_position,
         "buy_cond": buy_cond,
         "sell_cond": sell_cond,
         "warmup": int(min(max(warmup, 0), len(buy_cond))),
@@ -1005,8 +1025,11 @@ def run_indicator(
             for cond, allowed in zip(result["sell_cond"], mask)
         ]
 
-        position, action = _state_machine(exec_buy, exec_sell, repeat)
+        position, action, net_position = _state_machine(
+            exec_buy, exec_sell, repeat
+        )
         result["position"] = position
         result["action"] = action
+        result["net_position"] = net_position
 
     return result
