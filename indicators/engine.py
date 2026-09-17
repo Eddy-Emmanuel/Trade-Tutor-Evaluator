@@ -953,6 +953,7 @@ def run_indicator(
     sell_direction: str,
     repeat: bool = False,
     params: dict | None = None,
+    execution_mask: pd.Series | list | None = None,
 ) -> dict:
     fn = INDICATOR_MAP.get(indicator_name)
     if fn is None:
@@ -976,7 +977,7 @@ def run_indicator(
     if not uses_pct(indicator_name):
         buy_pct = sell_pct = 0.0
 
-    return fn(
+    result = fn(
         prices=prices,
         window=window,
         buy_pct=buy_pct,
@@ -986,3 +987,26 @@ def run_indicator(
         repeat=repeat,
         **extras,
     )
+
+    if execution_mask is not None:
+        mask = [bool(x) for x in execution_mask]
+
+        if len(mask) != len(prices):
+            raise ValueError(
+                "Execution mask length must match the price series length."
+            )
+
+        exec_buy = [
+            bool(cond) and allowed
+            for cond, allowed in zip(result["buy_cond"], mask)
+        ]
+        exec_sell = [
+            bool(cond) and allowed
+            for cond, allowed in zip(result["sell_cond"], mask)
+        ]
+
+        position, action = _state_machine(exec_buy, exec_sell, repeat)
+        result["position"] = position
+        result["action"] = action
+
+    return result

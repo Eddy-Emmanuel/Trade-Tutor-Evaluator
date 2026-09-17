@@ -8,22 +8,17 @@ from indicators.engine import run_indicator
 
 
 # ── Date / time window ────────────────────────────────────────────────────────
-def filter_by_window(
+def window_mask(
     df: pd.DataFrame,
     date_from: date | None = None,
     date_to: date | None = None,
     start_time: time | None = None,
     end_time: time | None = None,
     time_col: str = "Transaction Time",
-) -> pd.DataFrame:
-    """Trim rows to the Date From/To and Start/End Time window from the sidebar.
-
-    Dates are inclusive on both ends. The time filter is applied per row
-    (a session window such as 08:00–16:30), not as a single continuous span,
-    which is what an intraday trading session means.
-    """
+) -> pd.Series:
+    """Return True for rows inside the configured trading window."""
     if time_col not in df.columns:
-        return df
+        return pd.Series(True, index=df.index, dtype=bool)
 
     ts = pd.to_datetime(df[time_col], errors="coerce")
     mask = ts.notna()
@@ -37,6 +32,26 @@ def filter_by_window(
     if end_time is not None:
         mask &= ts.dt.time <= end_time
 
+    return mask
+
+
+def filter_by_window(
+    df: pd.DataFrame,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    start_time: time | None = None,
+    end_time: time | None = None,
+    time_col: str = "Transaction Time",
+) -> pd.DataFrame:
+    """Trim rows to the Date From/To and Start/End Time window from the sidebar."""
+    mask = window_mask(
+        df,
+        date_from=date_from,
+        date_to=date_to,
+        start_time=start_time,
+        end_time=end_time,
+        time_col=time_col,
+    )
     return df[mask].reset_index(drop=True)
 
 
@@ -109,6 +124,7 @@ def build_result_df(
     sell_direction: str,
     repeat_flag: bool = False,
     params: dict | None = None,
+    execution_mask: pd.Series | list | None = None,
 ) -> pd.DataFrame:
     if price_col not in df_raw.columns:
         raise ValueError(f"Price column '{price_col}' not in data.")
@@ -141,6 +157,7 @@ def build_result_df(
         sell_direction=sell_direction,
         repeat=repeat_flag,
         params=indicator_params,
+        execution_mask=execution_mask,
     )
 
     df = df_raw.copy()

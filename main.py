@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 from utils.excel_export import build_workbook
-from utils.pipeline import build_result_df, compute_pnl, filter_by_window
+from utils.pipeline import build_result_df, compute_pnl, filter_by_window, window_mask
 from indicators.engine import INDICATOR_MAP, INDICATOR_HINTS, spec_for
 from utils.file_loader import load_file, available_price_cols, validate_sma_columns
 
@@ -439,9 +439,28 @@ df_raw = df_loaded
 if "Symbol" in df_raw.columns and instrument in set(df_raw["Symbol"].astype(str)):
     df_raw = df_raw[df_raw["Symbol"].astype(str) == instrument].reset_index(drop=True)
 
+# Indicators must process bars in chronological order and may use history
+# before the selected trading session for warm-up and crossover calculations.
+if "Transaction Time" in df_raw.columns:
+    sort_ts = pd.to_datetime(df_raw["Transaction Time"], errors="coerce")
+    df_raw = (
+        df_raw.assign(_sort_time=sort_ts)
+        .sort_values("_sort_time", kind="stable", na_position="last")
+        .drop(columns="_sort_time")
+        .reset_index(drop=True)
+    )
+
 rows_before = len(df_raw)
-df_raw = filter_by_window(df_raw, date_from, date_to, start_time, end_time)
-rows_after = len(df_raw)
+
+execution_mask = window_mask(
+    df_raw,
+    date_from=date_from,
+    date_to=date_to,
+    start_time=start_time,
+    end_time=end_time,
+)
+
+rows_after = int(execution_mask.sum())
 
 if rows_after == 0:
     st.warning(
@@ -450,10 +469,14 @@ if rows_after == 0:
     )
     st.stop()
 
+# Selected rows are used for UI information only.
+# Indicator calculation below still receives the full chronological history.
+df_window = df_raw[execution_mask].reset_index(drop=True)
+
 # ── Instrument + cost panel ────────────────────────────────────────────────────
-symbol = str(df_raw["Symbol"].iloc[0]) if "Symbol" in df_raw.columns else instrument
+symbol = str(df_window["Symbol"].iloc[0]) if "Symbol" in df_window.columns else instrument
 short_sym = symbol[:4].upper()
-last_px = float(df_raw[price_col].iloc[-1])
+last_px = float(df_window[price_col].iloc[-1])
 
 cost_panel.markdown(
     f'<div class="cost-panel">'
@@ -472,7 +495,7 @@ st.success(
 )
 
 # ── Column validation ──────────────────────────────────────────────────────────
-val = validate_sma_columns(df_raw, price_col)
+val = validate_sma_columns(df_window, price_col)
 with st.expander(
     f"Column validation — {len(val['present'])} present / {len(val['missing'])} missing",
     expanded=len(val["missing"]) > 0,
@@ -498,11 +521,27 @@ if not st.session_state.get("has_run"):
 
 # ── Calculate ──────────────────────────────────────────────────────────────────
 try:
-    df_result = build_result_df(
+    df_full_result = build_result_df(
         df_raw, indicator_name, price_col,
         window, buy_pct, sell_pct, buy_direction, sell_direction,
         repeat_flag, params=params,
+        execution_mask=execution_mask,
     )
+
+    # Warm-up belongs to the full chronological history. Only count warm-up
+    # rows that actually fall inside the selected trading window for the UI.
+    full_warmup = int(df_full_result.attrs.get("warmup", 0))
+    visible_warmup = int(execution_mask.iloc[:full_warmup].sum())
+
+    # Hide pre/post-session history only after the indicator has been calculated.
+    df_result = filter_by_window(
+        df_full_result,
+        date_from=date_from,
+        date_to=date_to,
+        start_time=start_time,
+        end_time=end_time,
+    )
+    df_result.attrs["warmup"] = visible_warmup
 except Exception as e:
     st.error(f"Calculation error: {e}")
     st.stop()
